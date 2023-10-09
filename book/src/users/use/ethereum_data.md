@@ -1,7 +1,7 @@
 # Ethereum data
 
 Trin is designed to eventually serve the JSON-RPC methods that an Ethereum full node would
-provide. This includes methods the start with the `eth_` namespace.
+provide. This includes methods that start with the `eth_` namespace.
 
 Here is an example of making an `eth_blockNumber` request to a node serving over HTTP to get
 the latest block number.
