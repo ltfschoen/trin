@@ -7,13 +7,13 @@ stateDiagram-v2
     trin: trin
 
     state trin {
-        utplistner: UTP listner
+        utplistener: UTP listener
         subprotocolhandler: sub-protocol handler
         subprotocolnetworktask: sub-protocol network task
         portaleventshandler: portal events handler
         jsonrpcserver: JSON-RPC server
 
-        main() --> utplistner
+        main() --> utplistener
         main() --> subprotocolhandler
         main() --> subprotocolnetworktask
         main() --> portaleventshandler
@@ -22,7 +22,7 @@ stateDiagram-v2
     }
 
 ```
-Where for each sub-protocol implemented (History, State, Etc.,), a new thread is started.
+Where for each sub-protocol implemented (History, State, Etc.), a new thread is started.
 
 Here are some of the major components of trin-core that are called on startup within `./trin-core/src/lib.rs`.
 
@@ -104,6 +104,6 @@ stateDiagram-v2
     }
 ```
 
-Then `./trin-core/portalnet/events.rs` is handles events at the level of the Portal Wire Protocol.
+Then `./trin-core/portalnet/events.rs` handles events at the level of the Portal Wire Protocol.
 These are defined messages that are compliant with the Discv5 protocol, and specific
 to the Portal Network.
