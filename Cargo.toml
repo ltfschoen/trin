@@ -43,6 +43,10 @@ trin-utils = { path = "trin-utils" }
 trin-validation = { path = "trin-validation" }
 utp-rs = "0.1.0-alpha.8"
 
+# required for examples/my_discv5_app.rs
+async-std = "1.9"
+futures = "0.3.23"
+
 [dev-dependencies]
 ethers-core = { version = "2.0", default-features = false}
 ethers-providers = { version = "2.0", default-features = false, features = ["ipc"] }
