@@ -22,8 +22,10 @@ pub async fn proxy_query_to_history_subnet(
         endpoint,
         resp: resp_tx,
     };
+    println!("message {:#?}", message);
     let _ = network.send(message);
 
+    // TODO - resolve cause of error `RequestTimeout`
     match resp_rx.recv().await {
         Some(val) => match val {
             Ok(result) => Ok(result),
@@ -39,9 +41,12 @@ pub async fn find_header_by_hash(
     network: &mpsc::UnboundedSender<HistoryJsonRpcRequest>,
     block_hash: H256,
 ) -> Result<Header, RpcServeError> {
+    println!("find_header_by_hash");
     // Request the block header from the history subnet.
     let content_key: HistoryContentKey = HistoryContentKey::BlockHeaderWithProof(block_hash.into());
+    println!("content_key {:#?}", content_key);
     let header = find_content_by_hash(network, content_key).await?;
+    println!("header {:#?}", header);
 
     match header {
         HistoryContentValue::BlockHeaderWithProof(h) => Ok(h.header),
@@ -73,8 +78,11 @@ async fn find_content_by_hash(
     network: &mpsc::UnboundedSender<HistoryJsonRpcRequest>,
     content_key: HistoryContentKey,
 ) -> Result<HistoryContentValue, RpcServeError> {
+    println!("find_content_by_hash");
     let endpoint = HistoryEndpoint::RecursiveFindContent(content_key.clone());
+    println!("endpoint {:#?}", endpoint);
     let mut result = proxy_query_to_history_subnet(network, endpoint).await?;
+    println!("result {:#?}", result);
     let content = match result["content"].take() {
         serde_json::Value::String(s) => s,
         wrong_type => {

@@ -38,7 +38,7 @@ impl Rpc {
         let (handle, addr) = start(rpc_inner).await?;
         self.handle = Some(handle);
 
-        info!("rpc server started at {}", addr);
+        println!("rpc server started at {}", addr);
 
         Ok(addr)
     }
@@ -87,7 +87,9 @@ async fn start(rpc: RpcInner) -> Result<(ServerHandle, SocketAddr)> {
 
     let mut methods = Methods::new();
     let eth_methods: Methods = EthRpcServer::into_rpc(rpc.clone()).into();
+    println!("eth_methods {:#?}", eth_methods);
     let net_methods: Methods = NetRpcServer::into_rpc(rpc).into();
+    println!("net_methods {:#?}", net_methods);
 
     methods.merge(eth_methods)?;
     methods.merge(net_methods)?;
