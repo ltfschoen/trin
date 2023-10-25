@@ -19,10 +19,10 @@ use ethers_providers::Middleware;
 //   cargo run -- \
 //   --web3-http-address http://127.0.0.1:8545 \
 //   --web3-transport http \
-//   --discovery-port 9008 \
-//   --external-address 127.0.0.1:9008 \
+//   --discovery-port 9007 \
+//   --external-address 127.0.0.1:9007 \
 //   --ephemeral \
-//   --bootnodes "enr:-I24QDy_atpK3KlPjl6X5yIrK7FosdHI1cW0I0MeiaIVuYg3AEEH9tRSTyFb2k6lpUiFsqxt8uTW3jVMUzoSlQf5OXYBY4d0IDAuMS4wgmlkgnY0gmlwhKEjVaWJc2VjcDI1NmsxoQOSGugH1jSdiE_fRK1FIBe9oLxaWH8D_7xXSnaOVBe-SYN1ZHCCIyg" \
+//   --bootnodes default \
 //   --mb 200
 // ```
 //
@@ -52,16 +52,16 @@ use ethers_providers::Middleware;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Connect to a local node JSON-RPC with HTTP
-    // let client = HttpClientBuilder::default()
-    //     .build("http://localhost:8545")
-    //     .unwrap();
+    let client = HttpClientBuilder::default()
+        .build("http://localhost:8545")
+        .unwrap();
 
     // Connect to a local node JSON-RPC with IPC
-    let DEFAULT_WEB3_IPC_PATH = "/tmp/trin-jsonrpc.ipc";
-    let client = reth_ipc::client::IpcClientBuilder::default()
-        .build(DEFAULT_WEB3_IPC_PATH)
-        .await
-        .unwrap();
+    // let DEFAULT_WEB3_IPC_PATH = "/tmp/trin-jsonrpc.ipc";
+    // let client = reth_ipc::client::IpcClientBuilder::default()
+    //     .build(DEFAULT_WEB3_IPC_PATH)
+    //     .await
+    //     .unwrap();
     println!("client {:#?}", client);
 
     // Call web3_clientVersion endpoint
