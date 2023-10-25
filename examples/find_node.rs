@@ -18,6 +18,8 @@
 //   --mb 200
 // ```
 //
+// Note: Bootnodes listed here: https://github.com/ethereum/portal-network-specs/blob/master/testnet.md
+//
 // Run
 // ```bash
 // cargo run --example find_node
@@ -80,8 +82,12 @@ async fn main() -> Result<(), anyhow::Error> {
     // Obtain ths after running the node with the command shown above
     let existing_remote_peer = "enr:-Jy4QDAjCCWVxtgqqd5c_ObTqHVpovx56HJD4GYJYGGxW_pcRvmQbxpn4lENvMCl4ZAmz5vfpLoXO3FSBCkzAD3JrNoBY5Z0IDAuMS4xLWFscGhhLjEtZjNlYTFkgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQLiJVQ_hAjtXTK37nvdWjJZ5YwTLZxK0ChU5HHZNOpALoN1ZHCCH0E".parse::<Enr<CombinedKey>>().unwrap();
 
+    // https://github.com/ethereum/portal-network-specs/blob/master/testnet.md
+    let existing_bootnode = "enr:-I24QDy_atpK3KlPjl6X5yIrK7FosdHI1cW0I0MeiaIVuYg3AEEH9tRSTyFb2k6lpUiFsqxt8uTW3jVMUzoSlQf5OXYBY4d0IDAuMS4wgmlkgnY0gmlwhKEjVaWJc2VjcDI1NmsxoQOSGugH1jSdiE_fRK1FIBe9oLxaWH8D_7xXSnaOVBe-SYN1ZHCCIyg".parse::<Enr<CombinedKey>>().unwrap();
+
     let remote_peers: Vec<discv5::Enr> = vec![
         existing_remote_peer.clone(),
+        existing_bootnode.clone(),
     ];
     // if we know of another peer's ENR, add it to known peers
     // using `add_enr` so the nodes are linked together
@@ -106,8 +112,11 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("Server started on port {:#?}", port);
 
     // run a find_node query
-    let found_nodes = discv5.find_node(existing_remote_peer.node_id()).await.unwrap();
-    println!("Found nodes: {:?}", found_nodes);
+    let found_existing_peer = discv5.find_node(existing_remote_peer.node_id()).await.unwrap();
+    println!("Found existing peer: {:?}", found_existing_peer);
+
+    let found_bootnode = discv5.find_node(existing_bootnode.node_id()).await.unwrap();
+    println!("Found bootnode: {:?}", found_bootnode);
 
     Ok(())
 }
