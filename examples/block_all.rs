@@ -47,7 +47,7 @@ use ethers_providers::Middleware;
 //
 // Troubleshooting: If you're Trin node logs aren't displaying `Session established with Node: ...` and running this script outputs
 // `RestartNeeded("Networking or low-level protocol error: bytes remaining on stream")` or 
-// `Call(ErrorObject { code: ServerError(-32099), message: "Content not found", data: None })`
+// `RequestTimeout` or `Call(ErrorObject { code: ServerError(-32099), message: "Content not found", data: None })`
 // then simply try using a different port (i.e. change 8999 to 8998) for both `--external-address` and `--discovery-port`
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
