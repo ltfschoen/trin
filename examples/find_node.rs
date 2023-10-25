@@ -10,10 +10,10 @@
 //   RUST_LOG=DEBUG && \
 //   TRIN_DATA_PATH=$HOME/.local/share/trin && \
 //   cargo run -- \
-//   --web3-http-address http://127.0.0.1:8547 \
+//   --web3-http-address http://127.0.0.1:8545 \
 //   --web3-transport http \
-//   --discovery-port 8001 \
-//   --external-address 127.0.0.1:8001 \
+//   --discovery-port 9008 \
+//   --external-address 127.0.0.1:9008 \
 //   --bootnodes default \
 //   --mb 200
 // ```
@@ -24,6 +24,9 @@
 // ```bash
 // cargo run --example find_node
 // ```
+//
+// IMPORTANT: If no response then check that `existing_remote_peer` matches the ENR
+// of the node that you are running on localhost  
 
 use std::error::Error;
 use std::net::{SocketAddr, Ipv4Addr};
@@ -38,7 +41,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // reference: https://docs.rs/discv5/latest/discv5/#usage
 
     let address = "127.0.0.1".parse::<Ipv4Addr>().unwrap();
-    let port = 9000; // or 8001
+    let port = 8001; // or 9009
 
     // generate a new enr key
     let enr_key = CombinedKey::generate_secp256k1();
@@ -78,9 +81,9 @@ async fn main() -> Result<(), anyhow::Error> {
     // in order to bootstrap the routing table an external ENR should be added
     // this can be done via `add_enr`
 
-    // Existing remote peer running on port 8001
+    // Existing remote peer that we ran above
     // Obtain ths after running the node with the command shown above
-    let existing_remote_peer = "enr:-Jy4QDAjCCWVxtgqqd5c_ObTqHVpovx56HJD4GYJYGGxW_pcRvmQbxpn4lENvMCl4ZAmz5vfpLoXO3FSBCkzAD3JrNoBY5Z0IDAuMS4xLWFscGhhLjEtZjNlYTFkgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQLiJVQ_hAjtXTK37nvdWjJZ5YwTLZxK0ChU5HHZNOpALoN1ZHCCH0E".parse::<Enr<CombinedKey>>().unwrap();
+    let existing_remote_peer = "enr:-Jy4QKkctS24c0eeJI-kz0jgWj_TPcAn8An1oI_vfPr7eRODQEG9xQNvWFmYCRRJVYj_S15gD7S5CpL019vj1aeGbX8MY5Z0IDAuMS4xLWFscGhhLjEtZTk3NWI4gmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQI4IvN210gauykKLlok_mGk0WtlnrPI-2ceX_zKgF_1m4N1ZHCCIzA".parse::<Enr<CombinedKey>>().unwrap();
 
     // https://github.com/ethereum/portal-network-specs/blob/master/testnet.md
     let existing_bootnode = "enr:-I24QDy_atpK3KlPjl6X5yIrK7FosdHI1cW0I0MeiaIVuYg3AEEH9tRSTyFb2k6lpUiFsqxt8uTW3jVMUzoSlQf5OXYBY4d0IDAuMS4wgmlkgnY0gmlwhKEjVaWJc2VjcDI1NmsxoQOSGugH1jSdiE_fRK1FIBe9oLxaWH8D_7xXSnaOVBe-SYN1ZHCCIyg".parse::<Enr<CombinedKey>>().unwrap();
