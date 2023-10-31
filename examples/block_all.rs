@@ -26,7 +26,7 @@ use ethers_providers::Middleware;
 //   --mb 200
 // ```
 //
-// OR Run with IPC
+// OR Run with IPC (uncomment to use the IPC `client` variable below and comment out the HTTP `client`)
 // Note: Only works if provide `--bootnodes default` as shown below
 // ```
 //   cargo build --workspace && \
@@ -52,16 +52,16 @@ use ethers_providers::Middleware;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Connect to a local node JSON-RPC with HTTP
-    let client = HttpClientBuilder::default()
-        .build("http://localhost:8545")
-        .unwrap();
+    // let client = HttpClientBuilder::default()
+    //     .build("http://localhost:8545")
+    //     .unwrap();
 
     // Connect to a local node JSON-RPC with IPC
-    // let DEFAULT_WEB3_IPC_PATH = "/tmp/trin-jsonrpc.ipc";
-    // let client = reth_ipc::client::IpcClientBuilder::default()
-    //     .build(DEFAULT_WEB3_IPC_PATH)
-    //     .await
-    //     .unwrap();
+    let DEFAULT_WEB3_IPC_PATH = "/tmp/trin-jsonrpc.ipc";
+    let client = reth_ipc::client::IpcClientBuilder::default()
+        .build(DEFAULT_WEB3_IPC_PATH)
+        .await
+        .unwrap();
     println!("client {:#?}", client);
 
     // Call web3_clientVersion endpoint
