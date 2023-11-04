@@ -98,43 +98,17 @@ async fn main() -> Result<(), anyhow::Error> {
     let client2_routing_table_info = HistoryNetworkApiClient::routing_table_info(&client2).await.unwrap();
     println!("client2 routing table info {:?}\n", client2_routing_table_info);
 
-    let enr_to_delete = "enr:-I24QDy_atpK3KlPjl6X5yIrK7FosdHI1cW0I0MeiaIVuYg3AEEH9tRSTyFb2k6lpUiFsqxt8uTW3jVMUzoSlQf5OXYBY4d0IDAuMS4wgmlkgnY0gmlwhKEjVaWJc2VjcDI1NmsxoQOSGugH1jSdiE_fRK1FIBe9oLxaWH8D_7xXSnaOVBe-SYN1ZHCCIyg".parse::<Discv5Enr<Discv5CombinedKey>>().unwrap();
-    let enr_to_delete_node_id = enr_to_delete.node_id();
-
-    // Delete an existing ENR from the routing table of client1 otherwise we cannot add
-    // client2 because it will say its bucket is already full
-    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::delete_enr(&client1, enr_to_delete_node_id).await {
-        println!("Cannot delete existing ENR from client1 as it may have already been deleted {}", e);
+    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::get_enr(&client1, client2_node_info.enr.node_id()).await {
+        println!("Cannot find client2 ENR in client1 routing table {}", e);
     } else {
-        println!("Deleted existing ENR from client1 routing table");
+        println!("Found existing ENR from client1 routing table");
     }
 
-    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::add_enr(&client1, client2_enr.clone()).await {
-        bail!("Failed to add client2 ENR to client1 routing table");
+    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::get_enr(&client2, client1_node_info.enr.node_id()).await {
+        println!("Cannot find client1 ENR in client2 routing table {}", e);
     } else {
-        println!("Added client2 ENR to client1 routing table");
+        println!("Found existing ENR from client2 routing table");
     }
-
-    // Delete an existing ENR from the routing table of client2 otherwise we cannot add
-    // client1 because it will say its bucket is already full
-    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::delete_enr(&client2, enr_to_delete_node_id).await {
-        println!("Cannot delete existing ENR from client2 as it may have already been deleted {}", e);
-    } else {
-        println!("Deleted existing ENR from client2 routing table");
-    }
-
-    if let Err(JRErr::Custom(e)) = HistoryNetworkApiClient::add_enr(&client2, client1_enr.clone()).await {
-        bail!("Failed to add client1 ENR to client2 routing table");
-    } else {
-        println!("Added client1 ENR to client2 routing table");
-    }
-
-    // Check that routing table has been changed
-    let client1_routing_table_info = HistoryNetworkApiClient::routing_table_info(&client1).await.unwrap();
-    println!("client1 routing table info {:?}\n", client1_routing_table_info);
-
-    let client2_routing_table_info = HistoryNetworkApiClient::routing_table_info(&client2).await.unwrap();
-    println!("client2 routing table info {:?}\n", client2_routing_table_info);
 
     let (content_key, content_value) = fixture_header_with_proof();
 
