@@ -16,8 +16,8 @@ description = "A Rust implementation of the Ethereum Portal Network"
 anyhow = "1.0.68"
 clap = { version = "4.2.1", features = ["derive"] }
 discv5 = { git = "https://github.com/njgheorghita/discv5.git", rev = "700bdb97afd87016222e902f844bb95eb0d78d99", features = ["serde"] }
-eth2_ssz = "0.4.0"
-ethereum-types = "0.12.1"
+ethereum-types = "0.14.1"
+ethereum_ssz = "0.5.3"
 ethportal-api = { path = "ethportal-api" }
 jsonrpsee = "0.20.0"
 lazy_static = "1.4.0"
@@ -26,6 +26,7 @@ portalnet = { path = "portalnet" }
 prometheus_exporter = "0.8.4"
 rand = "0.8.4"
 reth-ipc = { tag = "v0.1.0-alpha.10", git = "https://github.com/paradigmxyz/reth.git"}
+reth-rpc-types = { tag = "v0.1.0-alpha.10", git = "https://github.com/paradigmxyz/reth.git"}
 rlp = "0.5.0"
 rocksdb = "0.21.0"
 rpc = { path = "rpc"}
@@ -42,9 +43,14 @@ trin-utils = { path = "trin-utils" }
 trin-validation = { path = "trin-validation" }
 utp-rs = "0.1.0-alpha.8"
 
+# required for examples/my_discv5_app.rs
+async-std = "1.9"
+futures = "0.3.23"
+
 [dev-dependencies]
 ethers-core = { version = "2.0", default-features = false}
 ethers-providers = { version = "2.0", default-features = false, features = ["ipc"] }
+ethers-signers = { version = "2.0", default-features = false}
 ethportal-peertest = { path = "ethportal-peertest" }
 serde_yaml = "0.9.25"
 serial_test = "0.5.1"

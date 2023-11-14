@@ -26,6 +26,7 @@ use utp_rs::socket::UtpSocket;
 use crate::{
     discovery::{Discovery, UtpEnr},
     find::query_info::{FindContentResult, RecursiveFindContentResult},
+    gossip::{propagate_gossip_cross_thread, trace_propagate_gossip_cross_thread, GossipResult},
     metrics::overlay::OverlayMetricsReporter,
     metrics::portalnet::PORTALNET_METRICS,
     overlay_service::{
@@ -65,6 +66,7 @@ pub struct OverlayConfig {
     pub query_peer_timeout: Duration,
     pub query_num_results: usize,
     pub findnodes_query_distances_per_peer: usize,
+    pub disable_poke: bool,
 }
 
 impl Default for OverlayConfig {
@@ -81,6 +83,7 @@ impl Default for OverlayConfig {
             query_timeout: Duration::from_secs(60),
             query_num_results: MAX_NODES_PER_BUCKET,
             findnodes_query_distances_per_peer: 3,
+            disable_poke: false,
         }
     }
 }
@@ -161,6 +164,7 @@ where
             config.query_parallelism,
             config.query_num_results,
             config.findnodes_query_distances_per_peer,
+            config.disable_poke,
         )
         .await;
 
@@ -217,11 +221,19 @@ where
     /// Propagate gossip accepted content via OFFER/ACCEPT, return number of peers propagated
     pub fn propagate_gossip(&self, content: Vec<(TContentKey, Vec<u8>)>) -> usize {
         let kbuckets = Arc::clone(&self.kbuckets);
-        crate::overlay_service::propagate_gossip_cross_thread(
-            content,
-            kbuckets,
-            self.command_tx.clone(),
-        )
+        propagate_gossip_cross_thread(content, kbuckets, self.command_tx.clone())
+    }
+
+    /// Propagate gossip accepted content via OFFER/ACCEPT, returns trace detailing outcome of
+    /// gossip
+    pub async fn propagate_gossip_trace(
+        &self,
+        content_key: TContentKey,
+        data: Vec<u8>,
+    ) -> GossipResult {
+        let kbuckets = Arc::clone(&self.kbuckets);
+        trace_propagate_gossip_cross_thread(content_key, data, kbuckets, self.command_tx.clone())
+            .await
     }
 
     /// Returns a vector of all ENR node IDs of nodes currently contained in the routing table.

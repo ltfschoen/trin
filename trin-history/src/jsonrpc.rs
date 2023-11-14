@@ -67,6 +67,9 @@ async fn complete_request(network: Arc<RwLock<HistoryNetwork>>, request: History
         HistoryEndpoint::Gossip(content_key, content_value) => {
             gossip(network, content_key, content_value).await
         }
+        HistoryEndpoint::TraceGossip(content_key, content_value) => {
+            gossip_trace(network, content_key, content_value).await
+        }
         HistoryEndpoint::LookupEnr(node_id) => lookup_enr(network, node_id).await,
         HistoryEndpoint::Offer(enr, content_key, content_value) => {
             offer(network, enr, content_key, content_value).await
@@ -105,10 +108,7 @@ async fn recursive_find_content(
     let (possible_content_bytes, utp_transfer, trace) = match local_content {
         Some(val) => {
             let local_enr = overlay.local_enr();
-            let mut trace = QueryTrace::new(
-                &overlay.local_enr(),
-                NodeId::new(&content_key.content_id()).into(),
-            );
+            let mut trace = QueryTrace::new(&overlay.local_enr(), content_key.content_id());
             trace.node_responded_with_content(&local_enr);
             (Some(val), false, if is_trace { Some(trace) } else { None })
         }
@@ -288,10 +288,21 @@ async fn gossip(
     content_value: ethportal_api::HistoryContentValue,
 ) -> Result<Value, String> {
     let data = content_value.encode();
-    let content_values = vec![(content_key, data)];
     let overlay = network.read().await.overlay.clone();
-    let num_peers = overlay.propagate_gossip(content_values);
-    Ok(num_peers.into())
+    Ok(overlay.propagate_gossip(vec![(content_key, data)]).into())
+}
+
+/// Constructs a JSON call for the Gossip method, with tracing enabled.
+async fn gossip_trace(
+    network: Arc<RwLock<HistoryNetwork>>,
+    content_key: HistoryContentKey,
+    content_value: ethportal_api::HistoryContentValue,
+) -> Result<Value, String> {
+    let data = content_value.encode();
+    let overlay = network.read().await.overlay.clone();
+    Ok(json!(
+        overlay.propagate_gossip_trace(content_key, data).await
+    ))
 }
 
 /// Constructs a JSON call for the Offer method.

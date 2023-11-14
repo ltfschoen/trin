@@ -1,16 +1,31 @@
+use std::cmp::Ordering;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
+use anyhow::bail;
+use jsonrpsee::http_client::HttpClient;
+use serde_json::Value;
+use ssz_types::VariableList;
+use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
+use tracing::{info, warn};
+
 use crate::consensus_api::ConsensusApi;
 use crate::constants::BEACON_GENESIS_TIME;
 use crate::mode::BridgeMode;
+use crate::stats::{BeaconSlotStats, StatsReporter};
 use crate::utils::{
     duration_until_next_update, expected_current_slot, read_test_assets_from_file, TestAssets,
 };
-use anyhow::bail;
 use ethportal_api::types::consensus::fork::ForkName;
 use ethportal_api::types::consensus::light_client::bootstrap::LightClientBootstrapCapella;
 use ethportal_api::types::consensus::light_client::finality_update::LightClientFinalityUpdateCapella;
 use ethportal_api::types::consensus::light_client::optimistic_update::LightClientOptimisticUpdateCapella;
 use ethportal_api::types::consensus::light_client::update::{
     LightClientUpdate, LightClientUpdateCapella,
+};
+use ethportal_api::types::content_key::beacon::{
+    LightClientFinalityUpdateKey, LightClientOptimisticUpdateKey,
 };
 use ethportal_api::types::content_value::beacon::{
     ForkVersionedLightClientUpdate, LightClientUpdatesByRange,
@@ -20,19 +35,9 @@ use ethportal_api::BeaconNetworkApiClient;
 use ethportal_api::{
     BeaconContentKey, BeaconContentValue, LightClientBootstrapKey, LightClientUpdatesByRangeKey,
 };
-use jsonrpsee::http_client::HttpClient;
-use serde_json::Value;
-use ssz_types::VariableList;
-use std::cmp::Ordering;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::SystemTime;
-use tracing::{info, warn};
 
-use ethportal_api::types::content_key::beacon::{
-    LightClientFinalityUpdateKey, LightClientOptimisticUpdateKey,
-};
-use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
+/// The number of slots in a sync committee period.
+const SLOTS_PER_PERIOD: u64 = 32 * 256;
 
 pub struct BeaconBridge {
     pub api: ConsensusApi,
@@ -67,11 +72,14 @@ impl BeaconBridge {
             .into_beacon_assets()
             .expect("Error parsing beacon test assets.");
 
+        // test files have no slot number data, so report all gossiped content at height 0.
+        let slot_stats = Arc::new(Mutex::new(BeaconSlotStats::new(0)));
         for asset in assets.0.into_iter() {
             BeaconBridge::gossip_beacon_content(
                 Arc::clone(&self.portal_clients),
                 asset.content_key,
                 asset.content_value,
+                slot_stats.clone(),
             )
             .await
             .expect("Error serving beacon data in test mode.");
@@ -81,13 +89,15 @@ impl BeaconBridge {
     ///  Get and serve the latest beacon data.
     async fn launch_latest(&self) {
         // Current sync committee period known by the bridge
-        let (mut current_period, mut finalized_block_root) = Self::serve_latest(
-            self.api.clone(),
-            self.portal_clients.clone(),
-            0,
-            String::new(),
-        )
-        .await;
+        let (mut current_period, mut finalized_block_root, mut finalized_slot) =
+            Self::serve_latest(
+                self.api.clone(),
+                self.portal_clients.clone(),
+                0,
+                String::new(),
+                0,
+            )
+            .await;
 
         // Sleep until next update becomes available. This sets up the interval to update as soon as
         // the following slot becomes available.
@@ -107,11 +117,12 @@ impl BeaconBridge {
             let consensus_api = self.api.clone();
             let portal_clients = self.portal_clients.clone();
 
-            (current_period, finalized_block_root) = Self::serve_latest(
+            (current_period, finalized_block_root, finalized_slot) = Self::serve_latest(
                 consensus_api,
                 portal_clients,
                 current_period,
                 finalized_block_root,
+                finalized_slot,
             )
             .await;
 
@@ -127,16 +138,20 @@ impl BeaconBridge {
         portal_clients: Arc<Vec<HttpClient>>,
         current_period: u64,
         finalized_block_root: String,
-    ) -> (u64, String) {
+        finalized_slot: u64,
+    ) -> (u64, String, u64) {
         // Serve LightClientBootstrap data
         let api_clone = api.clone();
         let portal_clients_clone = Arc::clone(&portal_clients);
+        let slot_stats = Arc::new(Mutex::new(BeaconSlotStats::new(finalized_slot)));
 
+        let slot_stats_clone = slot_stats.clone();
         let bootstrap_result = tokio::spawn(async move {
             Self::serve_light_client_bootstrap(
                 api_clone,
                 portal_clients_clone,
                 &finalized_block_root,
+                slot_stats_clone,
             )
             .await
             .or_else(|err| {
@@ -150,30 +165,47 @@ impl BeaconBridge {
         let api_clone = api.clone();
         let portal_clients_clone = Arc::clone(&portal_clients);
 
+        let slot_stats_clone = slot_stats.clone();
         let update_result = tokio::spawn(async move {
-            Self::serve_light_client_update(api_clone, portal_clients_clone, current_period)
-                .await
-                .or_else(|err| {
-                    warn!("Failed to serve light client update: {err}");
-                    Ok::<u64, ()>(current_period)
-                })
-                .expect("always return the original or new period")
+            Self::serve_light_client_update(
+                api_clone,
+                portal_clients_clone,
+                current_period,
+                slot_stats_clone,
+            )
+            .await
+            .or_else(|err| {
+                warn!("Failed to serve light client update: {err}");
+                Ok::<u64, ()>(current_period)
+            })
+            .expect("always return the original or new period")
         });
 
         // Serve `LightClientFinalityUpdate` data
         let api_clone = api.clone();
         let portal_clients_clone = Arc::clone(&portal_clients);
-        tokio::spawn(async move {
-            if let Err(err) =
-                Self::serve_light_client_finality_update(api_clone, portal_clients_clone).await
-            {
+        let slot_stats_clone = slot_stats.clone();
+        let finalized_slot = tokio::spawn(async move {
+            Self::serve_light_client_finality_update(
+                api_clone,
+                portal_clients_clone,
+                finalized_slot,
+                slot_stats_clone,
+            )
+            .await
+            .or_else(|err| {
                 warn!("Failed to serve light client finality update: {err}");
-            }
+                Ok::<u64, ()>(finalized_slot)
+            })
+            .expect("always return the original or new finalized slot")
         });
 
         // Serve `LightClientOptimisticUpdate` data
-        tokio::spawn(async move {
-            if let Err(err) = Self::serve_light_client_optimistic_update(api, portal_clients).await
+        let slot_stats_clone = slot_stats.clone();
+        let optimistic_update = tokio::spawn(async move {
+            if let Err(err) =
+                Self::serve_light_client_optimistic_update(api, portal_clients, slot_stats_clone)
+                    .await
             {
                 warn!("Failed to serve light client optimistic update: {err}");
             }
@@ -183,7 +215,18 @@ impl BeaconBridge {
         let new_finalized_block_root = bootstrap_result
             .await
             .expect("bootstrap task is never cancelled");
-        (new_period, new_finalized_block_root)
+        let finalized_slot = finalized_slot
+            .await
+            .expect("finality update task is never cancelled");
+        optimistic_update
+            .await
+            .expect("optimistic update task is never cancelled");
+        if let Ok(stats) = slot_stats.lock() {
+            stats.report();
+        } else {
+            warn!("Error displaying beacon gossip stats. Unable to acquire lock.");
+        };
+        (new_period, new_finalized_block_root, finalized_slot)
     }
 
     /// Serve `LightClientBootstrap` data
@@ -191,6 +234,7 @@ impl BeaconBridge {
         api: ConsensusApi,
         portal_clients: Arc<Vec<HttpClient>>,
         finalized_block_root: &str,
+        slot_stats: Arc<Mutex<BeaconSlotStats>>,
     ) -> anyhow::Result<String> {
         let response = api.get_beacon_block_root("finalized".to_owned()).await?;
         let response: Value = serde_json::from_str(&response)?;
@@ -209,8 +253,8 @@ impl BeaconBridge {
             serde_json::from_value(result["data"].clone())?;
 
         info!(
-            "Got lc bootstrap for slot {:?}",
-            bootstrap.header.beacon.slot
+            header_slot=%bootstrap.header.beacon.slot,
+            "Generated LightClientBootstrap",
         );
 
         let content_value = BeaconContentValue::LightClientBootstrap(bootstrap.into());
@@ -221,7 +265,7 @@ impl BeaconBridge {
         });
 
         // Return the latest finalized block root if we successfully gossiped the latest bootstrap.
-        Self::gossip_beacon_content(portal_clients, content_key, content_value)
+        Self::gossip_beacon_content(portal_clients, content_key, content_value, slot_stats)
             .await
             .map(|_| latest_finalized_block_root)
     }
@@ -230,9 +274,11 @@ impl BeaconBridge {
         api: ConsensusApi,
         portal_clients: Arc<Vec<HttpClient>>,
         current_period: u64,
+        slot_stats: Arc<Mutex<BeaconSlotStats>>,
     ) -> anyhow::Result<u64> {
         let now = SystemTime::now();
-        let expected_current_period = expected_current_slot(BEACON_GENESIS_TIME, now) / (32 * 256);
+        let expected_current_period =
+            expected_current_slot(BEACON_GENESIS_TIME, now) / SLOTS_PER_PERIOD;
         match expected_current_period.cmp(&current_period) {
             Ordering::Equal => {
                 // We already gossiped the latest data from the current period, no need to serve it again.
@@ -250,6 +296,18 @@ impl BeaconBridge {
         let data = api.get_lc_updates(expected_current_period, 1).await?;
         let update: Value = serde_json::from_str(&data)?;
         let update: LightClientUpdateCapella = serde_json::from_value(update[0]["data"].clone())?;
+        let finalized_header_period = update.finalized_header.beacon.slot / SLOTS_PER_PERIOD;
+
+        // We don't serve a `LightClientUpdate` if its finalized header slot is not within the expected current period.
+        if finalized_header_period != expected_current_period {
+            warn!(
+                "LightClientUpdate finalized header is not for the expected period: Expected: {expected_current_period}, Actual: {actual_period}",
+                expected_current_period = expected_current_period,
+                actual_period = finalized_header_period
+            );
+            return Ok(current_period);
+        }
+
         let fork_versioned_update = ForkVersionedLightClientUpdate {
             fork_name: ForkName::Capella,
             update: LightClientUpdate::Capella(update.clone()),
@@ -264,19 +322,20 @@ impl BeaconBridge {
                 count: 1,
             });
         info!(
-            "Got lc update for slot {:?}",
-            update.attested_header.beacon.slot
+            period = %expected_current_period,
+            "Generated LightClientUpdate",
         );
 
         // Update the current known period if we successfully gossiped the latest data.
-        Self::gossip_beacon_content(portal_clients, content_key, content_value)
-            .await
-            .map(|_| expected_current_period)
+        Self::gossip_beacon_content(portal_clients, content_key, content_value, slot_stats).await?;
+
+        Ok(expected_current_period)
     }
 
     async fn serve_light_client_optimistic_update(
         api: ConsensusApi,
         portal_clients: Arc<Vec<HttpClient>>,
+        slot_stats: Arc<Mutex<BeaconSlotStats>>,
     ) -> anyhow::Result<()> {
         let data = api.get_lc_optimistic_update().await?;
         let update: Value = serde_json::from_str(&data)?;
@@ -284,35 +343,55 @@ impl BeaconBridge {
         let update: LightClientOptimisticUpdateCapella =
             serde_json::from_value(update["data"].clone())?;
         info!(
-            "Got lc optimistic update for slot {:?}",
-            update.attested_header.beacon.slot
+            signature_slot = %update.signature_slot,
+            "Generated LightClientOptimisticUpdate",
         );
         let content_key = BeaconContentKey::LightClientOptimisticUpdate(
             LightClientOptimisticUpdateKey::new(update.signature_slot),
         );
         let content_value = BeaconContentValue::LightClientOptimisticUpdate(update.into());
-
-        Self::gossip_beacon_content(portal_clients, content_key, content_value).await
+        Self::gossip_beacon_content(portal_clients, content_key, content_value, slot_stats).await
     }
 
     async fn serve_light_client_finality_update(
         api: ConsensusApi,
         portal_clients: Arc<Vec<HttpClient>>,
-    ) -> anyhow::Result<()> {
+        finalized_slot: u64,
+        slot_stats: Arc<Mutex<BeaconSlotStats>>,
+    ) -> anyhow::Result<u64> {
         let data = api.get_lc_finality_update().await?;
         let update: Value = serde_json::from_str(&data)?;
         let update: LightClientFinalityUpdateCapella =
             serde_json::from_value(update["data"].clone())?;
         info!(
-            "Got lc finality update for slot {:?}",
-            update.attested_header.beacon.slot
+            finalized_slot = %update.finalized_header.beacon.slot,
+            "Generated LightClientFinalityUpdate",
         );
+
+        let new_finalized_slot = update.finalized_header.beacon.slot;
+
+        match new_finalized_slot.cmp(&finalized_slot) {
+            Ordering::Equal => {
+                // We already gossiped the latest finality updated with the same finalized slot, no need to serve it again.
+                return Ok(finalized_slot);
+            }
+            Ordering::Less => {
+                // if we panic here, it is a bug
+                bail!("Consensus client must not unwind finalized block, but: New finalized slot is less than known finalized slot");
+            }
+            Ordering::Greater => {
+                // Continue
+            }
+        }
+
         let content_key = BeaconContentKey::LightClientFinalityUpdate(
-            LightClientFinalityUpdateKey::new(update.signature_slot),
+            LightClientFinalityUpdateKey::new(new_finalized_slot),
         );
         let content_value = BeaconContentValue::LightClientFinalityUpdate(update.into());
 
-        Self::gossip_beacon_content(portal_clients, content_key, content_value).await
+        Self::gossip_beacon_content(portal_clients, content_key, content_value, slot_stats).await?;
+
+        Ok(new_finalized_slot)
     }
 
     /// Gossip any given content key / value to the history network.
@@ -320,11 +399,19 @@ impl BeaconBridge {
         portal_clients: Arc<Vec<HttpClient>>,
         content_key: BeaconContentKey,
         content_value: BeaconContentValue,
+        slot_stats: Arc<Mutex<BeaconSlotStats>>,
     ) -> anyhow::Result<()> {
+        let mut results = vec![];
         for client in portal_clients.as_ref() {
-            client
-                .gossip(content_key.clone(), content_value.clone())
-                .await?;
+            let result = client
+                .trace_gossip(content_key.clone(), content_value.clone())
+                .await;
+            results.push(result);
+        }
+        if let Ok(mut data) = slot_stats.lock() {
+            data.update(content_key, results.into());
+        } else {
+            warn!("Error updating beacon gossip stats. Unable to acquire lock.");
         }
         Ok(())
     }

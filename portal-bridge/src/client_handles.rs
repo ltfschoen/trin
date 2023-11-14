@@ -38,6 +38,14 @@ pub fn fluffy_handle(
             .arg(format!("--metrics-address:{address}"))
             .arg(format!("--metrics-port:{port}"));
     }
+    if bridge_config.bootnodes != "default" {
+        for enr in bridge_config.bootnodes.split(',') {
+            command.args(["--bootstrap-node", enr]);
+        }
+    }
+    if let Some(ip) = bridge_config.external_ip {
+        command.arg(format!("--nat:extip:{ip}"));
+    }
     Ok(command.spawn()?)
 }
 
@@ -67,7 +75,10 @@ pub fn trin_handle(
             &format!("http://127.0.0.1:{rpc_port}"),
         ])
         .args(["--discovery-port", &format!("{udp_port}")])
-        .args(["--bootnodes", "default"]);
+        .args(["--bootnodes", &bridge_config.bootnodes]);
+    if let Some(ip) = bridge_config.external_ip {
+        command.args(["--external-address", &format!("{ip}:{udp_port}")]);
+    }
     if let Some(metrics_url) = bridge_config.metrics_url {
         let url: String = metrics_url.into();
         command.args(["--enable-metrics-with-url", &url]);

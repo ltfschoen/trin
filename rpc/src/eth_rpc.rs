@@ -32,6 +32,7 @@ impl EthApiServer for EthApi {
         block_hash: H256,
         hydrated_transactions: bool,
     ) -> RpcResult<Block> {
+        println!("get_block_by_hash");
         if hydrated_transactions {
             return Err(RpcServeError::Message(
                 "replying with all transaction bodies is not supported yet".into(),
@@ -40,18 +41,22 @@ impl EthApiServer for EthApi {
         }
 
         let header = find_header_by_hash(&self.network, block_hash).await?;
+        println!("header {:#?}", header);
         let body = find_block_body_by_hash(&self.network, block_hash).await?;
+        println!("body {:#?}", body);
         let transactions = match body {
             BlockBody::Legacy(body) => body.txs,
             BlockBody::Merge(body) => body.txs,
             BlockBody::Shanghai(body) => body.txs,
         };
+        println!("transactions {:#?}", transactions);
         let transactions = BlockTransactions::Hashes(
             transactions
                 .into_iter()
                 .map(|tx| tx.hash().as_fixed_bytes().into())
                 .collect(),
         );
+        println!("transactions {:#?}", transactions);
 
         // Combine header and block body into the single json representation of the block.
         let block = Block {
@@ -62,6 +67,7 @@ impl EthApiServer for EthApi {
             total_difficulty: None,
             withdrawals: None,
         };
+        println!("block {:#?}", block);
         Ok(block)
     }
 }

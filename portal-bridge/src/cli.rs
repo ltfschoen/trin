@@ -53,6 +53,19 @@ pub struct BridgeConfig {
     #[arg(long, help = "Url for metrics reporting")]
     pub metrics_url: Option<Url>,
 
+    #[arg(
+        default_value = "default",
+        long = "bootnodes",
+        help = "One or more comma-delimited base64-encoded ENR's or multiaddr strings of peers to initially add to the local routing table"
+    )]
+    pub bootnodes: String,
+
+    #[arg(
+        long = "external-ip",
+        help = "(Only use this if you are behind a NAT) The address which will be advertised to peers (in an ENR). Changing it does not change which address trin binds to, ex: 127.0.0.1"
+    )]
+    pub external_ip: Option<String>,
+
     #[command(subcommand)]
     pub client_type: ClientType,
 }
