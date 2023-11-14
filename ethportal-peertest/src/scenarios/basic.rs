@@ -120,9 +120,10 @@ pub async fn test_history_store(target: &Client) {
     assert!(result);
 }
 
-pub async fn test_history_store_content_on_target1_is_not_on_target2(target1: &Client, target2: &Client) {
+pub async fn test_history_store_content_on_target1_local_db_is_not_on_target2(target1: &Client, target2: &Client) {
     info!("Testing portal_historyStore store content on target1 to check it is not also propagated onto target2");
     let (content_key, content_value) = fixture_header_with_proof();
+    // `store` only stores it on the local db but does not propagate it
     let result = target1.store(content_key.clone(), content_value).await.unwrap();
     assert!(result);
     let result2 = wait_for_history_content(target1, content_key.clone()).await;
@@ -149,8 +150,8 @@ pub async fn test_history_store_content_on_target1_is_not_on_target2(target1: &C
     );
 }
 
-pub async fn test_history_offer_content_from_target1_is_on_target2(target1: &Client, target2: &Client) {
-    info!("Testing portal_historyStore store content on target1 to check it is not also propagated onto target2");
+pub async fn test_history_offered_content_from_target1_is_accepted_and_on_target2(target1: &Client, target2: &Client) {
+    info!("Testing portal_historyStore offered content from target1 is accepted and on target2");
 
     let client1_version = target1.client_version().await.unwrap();
     assert_eq!(client1_version, "trin v0.1.1-alpha.1-79c1bc".to_string(),
@@ -201,50 +202,32 @@ pub async fn test_history_offer_content_from_target1_is_on_target2(target1: &Cli
         "The received content {result2_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
     );
 
-    // // Offer content stored on client1 node to client2 node
-    // let result = target1
-    //     .offer(
-    //         Enr::from_str(&client2_enr.to_base64()).unwrap(),
-    //         content_key.clone(),
-    //         Some(content_value.clone()),
-    //     )
-    //     .await
-    //     .unwrap();
-    // println!("content stored on client1 node was offered to client2 node: {:#?}", result);
+    // Offer content stored on client1 node to client2 node
+    let result = target1
+        .offer(
+            Enr::from_str(&client2_enr.to_base64()).unwrap(),
+            content_key.clone(),
+            Some(content_value.clone()),
+        )
+        .await
+        .unwrap();
+    println!("content stored on client1 node was offered to client2 node: {:#?}", result);
 
-    // // Check that ACCEPT response sent by client2 accepted the offered content
-    // // TODO - why is this 0x02 instead of 0x03? does that mean it wasn't accepted by target2?
-    // assert_eq!(hex_encode(result.content_keys.into_bytes()), "0x02");
-    // println!("client2 accepted the the content offered by client1");
+    // Check that ACCEPT response sent by client2 accepted the offered content
+    // TODO - why is this 0x02 instead of 0x03? does that mean it wasn't accepted by target2?
+    assert_eq!(hex_encode(result.content_keys.into_bytes()), "0x03");
+    println!("client2 accepted the the content offered by client1");
 
-    // let expected_content_value_target2: HistoryContentValue = HistoryContentValue::decode("".as_bytes()).unwrap();
-    // let result3 = wait_for_history_content(target2, content_key.clone()).await;
-    // let result3_received_content_value = match result3 {
-    //     PossibleHistoryContentValue::ContentPresent(c) => c,
-    //     // make an absent value so we don't have to panic
-    //     PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
-    //     // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
-    // };
-    // assert_eq!(result3_received_content_value, expected_content_value_target2,
-    //     "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target2:?}",
-    // );
-
-    // let expected_content_value_targetXXXX: HistoryContentValue = HistoryContentValue::decode("".as_bytes()).unwrap();
-
-    // let expected_content_value_target2: HistoryContentValue =
-    //     serde_json::from_value(json!(HEADER_WITH_PROOF_CONTENT_VALUE)).unwrap();
-    // let result3 = wait_for_history_content(target2, content_key.clone()).await;
-    // let result3_received_content_value = match result3 {
-    //     PossibleHistoryContentValue::ContentPresent(c) => HistoryContentValue::decode("".as_bytes()).unwrap(),
-    //     PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
-    // };
-    // assert_eq!(expected_content_value_targetXXXX, expected_content_value_target2,
-    //     "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target2:?}",
-    // );
-
-    // sometimes tests don't even reach this point...
-    // assert_eq!(false, true, "ugghh");
-
+    let result3 = wait_for_history_content(target2, content_key.clone()).await;
+    let result3_received_content_value = match result3 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        // make an absent value so we don't have to panic
+        PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
+        // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result3_received_content_value, expected_content_value_target1,
+        "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
 }
 
 pub async fn test_history_routing_table_info(target: &Client) {
