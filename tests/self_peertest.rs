@@ -39,6 +39,7 @@ async fn peertest_stateless() {
     peertest::scenarios::basic::test_history_store(&target).await;
     peertest::scenarios::basic::test_history_store_content_on_target1_local_db_is_not_on_target2(&target, &target2).await;
     peertest::scenarios::basic::test_history_offered_content_from_target1_is_accepted_and_on_target2(&target, &target2).await;
+    peertest::scenarios::basic::test_history_gossiped_content_from_target1_is_accepted_and_on_target2(&target, &target2).await;
     peertest::scenarios::basic::test_history_routing_table_info(&target).await;
     peertest::scenarios::basic::test_history_local_content_absent(&target).await;
     peertest::scenarios::find::test_recursive_find_nodes_self(&peertest).await;
