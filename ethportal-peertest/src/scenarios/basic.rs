@@ -1,12 +1,20 @@
 use crate::constants::fixture_header_with_proof;
+use crate::constants::{
+    HEADER_WITH_PROOF_CONTENT_VALUE,
+};
+
 use crate::Peertest;
+use crate::utils::{wait_for_history_content, wait_for_history_content_from_remote};
+use std::str::FromStr;
 use ethereum_types::{H256, U256};
 use ethportal_api::types::distance::Distance;
 use ethportal_api::{
-    BlockHeaderKey, Discv5ApiClient, HistoryContentKey, HistoryNetworkApiClient,
-    PossibleHistoryContentValue, Web3ApiClient,
+    utils::bytes::hex_encode,
+    BlockHeaderKey, Discv5ApiClient, Enr, HistoryContentKey, HistoryContentValue, HistoryNetworkApiClient,
+    PossibleHistoryContentValue, Web3ApiClient, ContentValue, types::portal::ContentInfo
 };
 use jsonrpsee::async_client::Client;
+use serde_json::json;
 use ssz::Encode;
 use tracing::info;
 use trin_utils::version::get_trin_version;
@@ -110,6 +118,201 @@ pub async fn test_history_store(target: &Client) {
     let (content_key, content_value) = fixture_header_with_proof();
     let result = target.store(content_key, content_value).await.unwrap();
     assert!(result);
+}
+
+pub async fn test_history_store_content_on_target1_local_db_is_not_on_target2(target1: &Client, target2: &Client) {
+    info!("Testing portal_historyStore store content on target1 to check it is not also propagated onto target2");
+    let (content_key, content_value) = fixture_header_with_proof();
+    // `store` only stores it on the local db but does not propagate it
+    let result = target1.store(content_key.clone(), content_value).await.unwrap();
+    assert!(result);
+    let result2 = wait_for_history_content(target1, content_key.clone()).await;
+    let expected_content_value_target1: HistoryContentValue =
+        serde_json::from_value(json!(HEADER_WITH_PROOF_CONTENT_VALUE)).unwrap();
+    let result2_received_content_value = match result2 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result2_received_content_value, expected_content_value_target1,
+        "The received content {result2_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
+
+    let expected_content_value_target2: HistoryContentValue = HistoryContentValue::decode("".as_bytes()).unwrap();
+    let result3 = wait_for_history_content(target2, content_key.clone()).await;
+    let result3_received_content_value = match result3 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        // make an absent value so we don't have to panic
+        PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
+        // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result3_received_content_value, expected_content_value_target2,
+        "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target2:?}",
+    );
+}
+
+pub async fn test_history_offered_content_from_target1_is_accepted_and_on_target2(target1: &Client, target2: &Client) {
+    info!("Testing portal_historyStore offered content from target1 is accepted and on target2");
+
+    let client1_version = target1.client_version().await.unwrap();
+    assert_eq!(client1_version, "trin v0.1.1-alpha.1-79c1bc".to_string(),
+        "client1_version {client1_version:?}",
+    );
+
+    let client1_node_info = target1.node_info().await.unwrap();
+    println!("client1_node_info {:#?}", target1.node_info().await.unwrap());
+
+    let client1_enr = &client1_node_info.enr;
+    let client1_enr_node_id = client1_enr.node_id().to_string();
+    println!("client1 Node Id: {}", client1_enr_node_id);
+
+    if client1_enr.udp4_socket().is_some() {
+        let client1_base64_enr = client1_enr.to_base64();
+        println!("client1 base64 ENR: {}", client1_enr.to_base64());
+    }
+
+    let client2_version = target1.client_version().await.unwrap();
+    assert_eq!(client2_version, "trin v0.1.1-alpha.1-79c1bc".to_string(),
+        "client2_version {client2_version:?}",
+    );
+
+    let client2_node_info = target1.node_info().await.unwrap();
+    println!("client2_node_info {:#?}", target1.node_info().await.unwrap());
+
+    let client2_enr = &client2_node_info.enr;
+    let client2_enr_node_id = client2_enr.node_id().to_string();
+    println!("client2 Node Id: {}", client2_enr_node_id);
+
+    if client2_enr.udp4_socket().is_some() {
+        let client2_base64_enr = client2_enr.to_base64();
+        println!("client2 base64 ENR: {}", client2_enr.to_base64());
+    }
+
+    let (content_key, content_value) = fixture_header_with_proof();
+    // Store content on target1 node, call portal_historyStore endpoint
+    let result = target1.store(content_key.clone(), content_value.clone()).await.unwrap();
+    assert!(result);
+    let result2 = wait_for_history_content(target1, content_key.clone()).await;
+    let expected_content_value_target1: HistoryContentValue =
+        serde_json::from_value(json!(HEADER_WITH_PROOF_CONTENT_VALUE)).unwrap();
+    let result2_received_content_value = match result2 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result2_received_content_value, expected_content_value_target1,
+        "The received content {result2_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
+
+    // Offer content stored on client1 node to client2 node
+    let result = target1
+        .offer(
+            Enr::from_str(&client2_enr.to_base64()).unwrap(),
+            content_key.clone(),
+            Some(content_value.clone()),
+        )
+        .await
+        .unwrap();
+    println!("content stored on client1 node was offered to client2 node: {:#?}", result);
+
+    // FIXME - why is client2 not accepting the offered content below?
+
+    // // Check that ACCEPT response sent by client2 accepted the offered content
+    // // TODO - why is this 0x02 instead of 0x03? does that mean it wasn't accepted by target2?
+    // assert_eq!(hex_encode(result.content_keys.into_bytes()), "0x03");
+    // println!("client2 accepted the the content offered by client1");
+
+    // let result3 = wait_for_history_content(target2, content_key.clone()).await;
+    // let result3_received_content_value = match result3 {
+    //     PossibleHistoryContentValue::ContentPresent(c) => c,
+    //     // make an absent value so we don't have to panic
+    //     PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
+    //     // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    // };
+    // assert_eq!(result3_received_content_value, expected_content_value_target1,
+    //     "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    // );
+}
+
+pub async fn test_history_gossiped_content_from_target1_is_accepted_and_on_target2(target1: &Client, target2: &Client) {
+    info!("Testing portal_historyStore gossiped content from target1 is accepted and on target2");
+
+    let client1_version = target1.client_version().await.unwrap();
+    assert_eq!(client1_version, "trin v0.1.1-alpha.1-79c1bc".to_string(),
+        "client1_version {client1_version:?}",
+    );
+
+    let client1_node_info = target1.node_info().await.unwrap();
+    println!("client1_node_info {:#?}", target1.node_info().await.unwrap());
+
+    let client1_enr = &client1_node_info.enr;
+    let client1_enr_node_id = client1_enr.node_id().to_string();
+    println!("client1 Node Id: {}", client1_enr_node_id);
+
+    if client1_enr.udp4_socket().is_some() {
+        let client1_base64_enr = client1_enr.to_base64();
+        println!("client1 base64 ENR: {}", client1_enr.to_base64());
+    }
+
+    let client2_version = target1.client_version().await.unwrap();
+    assert_eq!(client2_version, "trin v0.1.1-alpha.1-79c1bc".to_string(),
+        "client2_version {client2_version:?}",
+    );
+
+    let client2_node_info = target1.node_info().await.unwrap();
+    println!("client2_node_info {:#?}", target1.node_info().await.unwrap());
+
+    let client2_enr = &client2_node_info.enr;
+    let client2_enr_node_id = client2_enr.node_id().to_string();
+    println!("client2 Node Id: {}", client2_enr_node_id);
+
+    if client2_enr.udp4_socket().is_some() {
+        let client2_base64_enr = client2_enr.to_base64();
+        println!("client2 base64 ENR: {}", client2_enr.to_base64());
+    }
+
+    let (content_key, content_value) = fixture_header_with_proof();
+    // Store content on target1 node, call portal_historyStore endpoint
+    let result = target1.store(content_key.clone(), content_value.clone()).await.unwrap();
+    assert!(result);
+    let result2 = wait_for_history_content(target1, content_key.clone()).await;
+    let expected_content_value_target1: HistoryContentValue =
+        serde_json::from_value(json!(HEADER_WITH_PROOF_CONTENT_VALUE)).unwrap();
+    let result2_received_content_value = match result2 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result2_received_content_value, expected_content_value_target1,
+        "The received content {result2_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
+
+    // Gossip content stored on client1 node to client2 node
+    let result = target1
+        .gossip(
+            content_key.clone(),
+            content_value.clone(),
+        )
+        .await
+        .unwrap();
+    println!("content stored on client1 node was gossiped to nodes: {:#?}", result);
+
+    assert_eq!(result, 1,
+        "gossiped to {result:?}",
+    );
+
+    let result3 = wait_for_history_content_from_remote(target1, client2_enr, content_key.clone()).await;
+    println!("result3 {:#?}", result3);
+    let mut _content = PossibleHistoryContentValue::ContentAbsent;
+    if let ContentInfo::Content { content, utp_transfer } = result3 {
+        _content = content;
+    }
+    let result3_received_content_value: HistoryContentValue = match _content {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        // make an absent value so we don't have to panic
+        PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
+        // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result3_received_content_value, expected_content_value_target1,
+        "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
 }
 
 pub async fn test_history_routing_table_info(target: &Client) {

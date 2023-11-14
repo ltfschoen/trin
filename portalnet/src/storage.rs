@@ -825,6 +825,7 @@ pub mod test {
 
     use crate::utils::db::{configure_node_data_dir, setup_temp_dir};
     use ethportal_api::types::content_key::overlay::IdentityContentKey;
+    use ethereum_types::H256;
 
     const CAPACITY_MB: u64 = 2;
 
@@ -899,6 +900,85 @@ pub mod test {
         assert_eq!(result, value);
 
         std::mem::drop(storage);
+        temp_dir.close()?;
+        Ok(())
+    }
+
+    #[test_log::test(tokio::test)]
+    #[serial]
+    async fn test_different_pk_nodes_have_different_node_data_dir() -> Result<(), ContentStoreError> {
+        let temp_dir = setup_temp_dir().unwrap();
+        let pk_node1 = CombinedKey::generate_secp256k1();
+        let pk_node1 = H256::from_slice(&pk_node1.encode());
+        let (node_node1_data_dir, mut active_pk_node1) =
+            configure_node_data_dir(temp_dir.path().to_path_buf(), Some(pk_node1)).unwrap();
+        assert_eq!(pk_node1, active_pk_node1);
+
+        let pk_node2 = CombinedKey::generate_secp256k1();
+        let pk_node2 = H256::from_slice(&pk_node2.encode());
+        let (node_node2_data_dir, mut active_pk_node2) =
+        configure_node_data_dir(temp_dir.path().to_path_buf(), Some(pk_node2)).unwrap();
+        assert_eq!(pk_node2, active_pk_node2);
+
+        // node1 and node2 have a different private key, which generates a different data subdirectory
+        // within the trin temporary directory
+        assert_ne!(node_node1_data_dir, node_node2_data_dir);
+
+        temp_dir.close()?;
+        Ok(())
+    }
+
+    #[test_log::test(tokio::test)]
+    #[serial]
+    async fn test_content_stored_in_node1_is_not_propagated_to_node2() -> Result<(), ContentStoreError> {
+        let temp_dir = setup_temp_dir().unwrap();
+        let pk_node1 = CombinedKey::generate_secp256k1();
+        let enr_node1 = EnrBuilder::new("v4").build(&pk_node1).expect("to be able to generate a random node id");
+        let node1_id = enr_node1.node_id();
+        let pk_node1 = H256::from_slice(&pk_node1.encode());
+        let (node1_data_dir, active_pk_node1) =
+            configure_node_data_dir(temp_dir.path().to_path_buf(), Some(pk_node1)).unwrap();
+
+        let storage_config_node1 =
+            PortalStorageConfig::new(4, node1_data_dir.clone(), node1_id).unwrap();
+        let mut storage_node1 = PortalStorage::new(storage_config_node1, ProtocolId::History)?;
+
+        let pk_node2 = CombinedKey::generate_secp256k1();
+        let enr_node2 = EnrBuilder::new("v4").build(&pk_node2).expect("to be able to generate a random node id");
+        let node2_id = enr_node2.node_id();
+        let pk_node2 = H256::from_slice(&pk_node2.encode());
+        let (node2_data_dir, active_pk_node2) =
+            configure_node_data_dir(temp_dir.path().to_path_buf(), Some(pk_node2)).unwrap();
+        // where capacity is 4mb
+        let storage_config_node2 =
+            PortalStorageConfig::new(4, node2_data_dir.clone(), node2_id).unwrap();
+        let mut storage_node2 = PortalStorage::new(storage_config_node2, ProtocolId::History)?;
+
+        // repeatedly store content key and value in node1 until reaches capacity of 4mb
+        for _ in 0..120 {
+            let content_key = generate_random_content_key();
+            let value: Vec<u8> = vec![0; 32_000];
+            storage_node1.store(&content_key, &value)?;
+        }
+
+        // get total storage used in the network by node1
+        let bytes = storage_node1.get_total_storage_usage_in_bytes_from_network()?;
+        assert_eq!(3_840_000, bytes); // 32kb * 120
+        assert_eq!(storage_node1.radius, Distance::MAX);
+        // Save the number of items, to compare with the restarted storage
+        let total_entry_count_node1 = storage_node1.total_entry_count().unwrap();
+        assert_eq!(120, total_entry_count_node1);
+        std::mem::drop(storage_node1);
+
+        // get total storage used in the network by node2
+        let bytes = storage_node2.get_total_storage_usage_in_bytes_from_network()?;
+        assert_eq!(0, bytes); // 0
+        assert_eq!(storage_node2.radius, Distance::MAX);
+        // Save the number of items, to compare with the restarted storage
+        let total_entry_count_node2 = storage_node2.total_entry_count().unwrap();
+        assert_eq!(0, total_entry_count_node2);
+        std::mem::drop(storage_node2);
+
         temp_dir.close()?;
         Ok(())
     }

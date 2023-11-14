@@ -7218,6 +7218,7 @@ dependencies = [
  "rlp",
  "rocksdb",
  "rpc",
+ "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",

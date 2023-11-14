@@ -1,8 +1,9 @@
 use tracing::error;
 
+use std::str::FromStr;
 use ethportal_api::{
-    BeaconContentKey, BeaconNetworkApiClient, HistoryContentKey, HistoryNetworkApiClient,
-    PossibleBeaconContentValue, PossibleHistoryContentValue,
+    BeaconContentKey, BeaconNetworkApiClient, Enr, HistoryContentKey, HistoryNetworkApiClient,
+    PossibleBeaconContentValue, PossibleHistoryContentValue, types::portal::ContentInfo,
 };
 
 /// Wait for the history content to be transferred
@@ -30,6 +31,37 @@ pub async fn wait_for_history_content<P: HistoryNetworkApiClient + std::marker::
     }
 
     received_content_value.unwrap()
+}
+
+/// Wait for the history content to be transferred
+pub async fn wait_for_history_content_from_remote<P: HistoryNetworkApiClient + std::marker::Sync>(
+    ipc_client: &P,
+    remote_enr: &Enr,
+    content_key: HistoryContentKey,
+) -> ContentInfo {
+    let mut received_content_info = ipc_client.find_content(
+        Enr::from_str(&remote_enr.to_base64()).unwrap(),
+        content_key.clone(),
+    ).await;
+
+    let mut counter = 0;
+
+    // If content is absent an error will be returned.
+    while counter < 5 {
+        let message = match received_content_info {
+            Ok(c) => return c,
+            Err(e) => format!("received an error {e}"),
+        };
+        error!("Retrying after 0.5s, because {message}");
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        received_content_info = ipc_client.find_content(
+            Enr::from_str(&remote_enr.to_base64()).unwrap(),
+            content_key.clone()
+        ).await;
+        counter += 1;
+    }
+
+    received_content_info.unwrap()
 }
 
 /// Wait for the beacon content to be transferred
