@@ -22,7 +22,8 @@ async fn peertest_stateless() {
     // without needing to reset the database between tests.
     // If a scenario is testing the state of the content database,
     // it should be added to its own test function.
-    let (peertest, target, handle) = setup_peertest().await;
+    // let (peertest, target, handle) = setup_peertest().await;
+    let (peertest, target, target2, handle, handle2) = setup_peertest_with_custom_ports().await;
     peertest::scenarios::paginate::test_paginate_local_storage(&peertest).await;
     peertest::scenarios::basic::test_web3_client_version(&target).await;
     peertest::scenarios::basic::test_discv5_node_info(&peertest).await;
@@ -36,6 +37,7 @@ async fn peertest_stateless() {
     peertest::scenarios::basic::test_history_find_nodes(&target, &peertest).await;
     peertest::scenarios::basic::test_history_find_nodes_zero_distance(&target, &peertest).await;
     peertest::scenarios::basic::test_history_store(&target).await;
+    peertest::scenarios::basic::test_history_store_content_on_target1_is_not_on_target2(&target, &target2).await;
     peertest::scenarios::basic::test_history_routing_table_info(&target).await;
     peertest::scenarios::basic::test_history_local_content_absent(&target).await;
     peertest::scenarios::find::test_recursive_find_nodes_self(&peertest).await;
@@ -44,6 +46,7 @@ async fn peertest_stateless() {
     peertest::scenarios::eth_rpc::test_eth_chain_id(&peertest).await;
     peertest.exit_all_nodes();
     handle.stop().unwrap();
+    handle2.stop().unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -203,6 +206,73 @@ async fn setup_peertest() -> (peertest::Peertest, Client, RpcServerHandle) {
         .await
         .unwrap();
     (peertest, target, test_client_rpc_handle)
+}
+
+async fn setup_peertest_with_custom_ports() -> (peertest::Peertest, Client, Client, RpcServerHandle, RpcServerHandle) {
+    utils::init_tracing();
+    // Run a client, as a buddy peer for ping tests, etc.
+    let peertest = peertest::launch_peertest_nodes(2).await;
+    // Short sleep to make sure all peertest nodes can connect
+    sleep(Duration::from_millis(100)).await;
+
+    let test_ip_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+    // Use an uncommon port for the peertest to avoid clashes.
+    let mut test_discovery_port1 = 8910;
+    let external_addr = format!("{test_ip_addr}:{test_discovery_port1}");
+
+    // Run a client, to be tested
+    let trin_config = TrinConfig::new_from(
+        [
+            "trin",
+            "--networks",
+            "history,state",
+            "--external-address",
+            external_addr.as_str(),
+            "--web3-ipc-path",
+            DEFAULT_WEB3_IPC_PATH,
+            "--ephemeral",
+            "--discovery-port",
+            test_discovery_port1.to_string().as_ref(),
+            "--bootnodes",
+            "none",
+        ]
+        .iter(),
+    )
+    .unwrap();
+    let test_client_rpc_handle1 = trin::run_trin(trin_config).await.unwrap();
+    let target1 = reth_ipc::client::IpcClientBuilder::default()
+        .build(DEFAULT_WEB3_IPC_PATH)
+        .await
+        .unwrap();
+
+    let mut test_discovery_port2 = 8920;
+    let external_addr2 = format!("{test_ip_addr}:{test_discovery_port2}");
+    let WEB3_IPC_PATH_2: &str = "/tmp/trin-jsonrpc2.ipc";
+    let trin_config2 = TrinConfig::new_from(
+        [
+            "trin",
+            "--networks",
+            "history,state",
+            "--external-address",
+            external_addr2.as_str(),
+            "--web3-ipc-path",
+            WEB3_IPC_PATH_2,
+            "--ephemeral",
+            "--discovery-port",
+            test_discovery_port2.to_string().as_ref(),
+            "--bootnodes",
+            "none",
+        ]
+        .iter(),
+    )
+    .unwrap();
+    let test_client_rpc_handle2 = trin::run_trin(trin_config2).await.unwrap();
+    let target2 = reth_ipc::client::IpcClientBuilder::default()
+        .build(WEB3_IPC_PATH_2)
+        .await
+        .unwrap();
+    (peertest, target1, target2, test_client_rpc_handle1, test_client_rpc_handle2)
 }
 
 async fn setup_peertest_bridge() -> (Peertest, HttpClient, RpcServerHandle) {

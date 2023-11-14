@@ -1,12 +1,18 @@
 use crate::constants::fixture_header_with_proof;
+use crate::constants::{
+    HEADER_WITH_PROOF_CONTENT_VALUE,
+};
+
 use crate::Peertest;
+use crate::utils::wait_for_history_content;
 use ethereum_types::{H256, U256};
 use ethportal_api::types::distance::Distance;
 use ethportal_api::{
-    BlockHeaderKey, Discv5ApiClient, HistoryContentKey, HistoryNetworkApiClient,
-    PossibleHistoryContentValue, Web3ApiClient,
+    BlockHeaderKey, Discv5ApiClient, HistoryContentKey, HistoryContentValue, HistoryNetworkApiClient,
+    PossibleHistoryContentValue, Web3ApiClient, ContentValue,
 };
 use jsonrpsee::async_client::Client;
+use serde_json::json;
 use ssz::Encode;
 use tracing::info;
 use trin_utils::version::get_trin_version;
@@ -110,6 +116,35 @@ pub async fn test_history_store(target: &Client) {
     let (content_key, content_value) = fixture_header_with_proof();
     let result = target.store(content_key, content_value).await.unwrap();
     assert!(result);
+}
+
+pub async fn test_history_store_content_on_target1_is_not_on_target2(target1: &Client, target2: &Client) {
+    info!("Testing portal_historyStore store content on target1 to check it is not also propagated onto target2");
+    let (content_key, content_value) = fixture_header_with_proof();
+    let result = target1.store(content_key.clone(), content_value).await.unwrap();
+    assert!(result);
+    let result2 = wait_for_history_content(target1, content_key.clone()).await;
+    let expected_content_value_target1: HistoryContentValue =
+        serde_json::from_value(json!(HEADER_WITH_PROOF_CONTENT_VALUE)).unwrap();
+    let result2_received_content_value = match result2 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result2_received_content_value, expected_content_value_target1,
+        "The received content {result2_received_content_value:?}, must match the expected {expected_content_value_target1:?}",
+    );
+
+    let expected_content_value_target2: HistoryContentValue = HistoryContentValue::decode("".as_bytes()).unwrap();
+    let result3 = wait_for_history_content(target2, content_key.clone()).await;
+    let result3_received_content_value = match result3 {
+        PossibleHistoryContentValue::ContentPresent(c) => c,
+        // make an absent value so we don't have to panic
+        PossibleHistoryContentValue::ContentAbsent => HistoryContentValue::decode("".as_bytes()).unwrap(),
+        // PossibleHistoryContentValue::ContentAbsent => panic!("Expected content to be found"),
+    };
+    assert_eq!(result3_received_content_value, expected_content_value_target2,
+        "The received content {result3_received_content_value:?}, must match the expected {expected_content_value_target2:?}",
+    );
 }
 
 pub async fn test_history_routing_table_info(target: &Client) {
